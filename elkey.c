@@ -58,7 +58,7 @@ ISR(TIM0_COMPA_vect)
 {
     switch (key_type) {
         case DAH:
-        if (dah_counter < 4) {
+        if (dah_counter < 3) { // Standard morse timing
             dah_counter++;
             OUT_ON();
         } else {
