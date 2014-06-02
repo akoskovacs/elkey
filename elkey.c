@@ -1,5 +1,7 @@
-//#define F_CPU   9.6MHZ
+//#define F_CPU   1E6
+#include <stdbool.h>
 #include <avr/io.h>
+#include <avr/sleep.h>
 #include <util/delay.h>
 #include <avr/interrupt.h>
 
@@ -9,12 +11,14 @@
 #define DOT_PORT     PORTB
 #define DOT_PIN      PINB
 #define DOT_DDR      DDRB
-#define DOT_MASK     _BV(3)
+#define DOT_MASK     _BV(1)
+#define DOT_INT      INT0
 
 #define DASH_PORT    PORTB
 #define DASH_PIN     PINB
 #define DASH_DDR     DDRB
-#define DASH_MASK    _BV(4)
+#define DASH_MASK    _BV(2)
+#define DASH_INT     PCINT2 /* Must match with the mask */
 
 #define OUT_PORT     PORTB
 #define OUT_DDR      DDRB
@@ -24,6 +28,9 @@
 #define OUT_ON()     OUT_PORT |= OUT_MASK
 #define OUT_OFF()    OUT_PORT &= ((uint8_t)~OUT_MASK)
 #define OUT_TOGGLE() OUT_PORT ^= ((uint8_t)OUT_MASK)
+
+#define IS_DIT()     (DOT_PIN & DOT_MASK)
+#define IS_DAH()     (DASH_PIN & DASH_MASK)
 
 enum MKEY_TYPE { 
     NONE,
@@ -38,7 +45,16 @@ enum MKEY_TYPE {
 void setup_pins(void)
 {
     /* The output is the only output :) */
-    OUT_DDR = OUT_MASK;
+    OUT_DDR    = OUT_MASK;
+    /* Pull up for dih and dah */
+    DOT_PORT  |= DOT_MASK;
+    DASH_PORT |= DASH_MASK;
+
+    MCUCR     |= _BV(ISC00); /* Any logical change triggers interrupts */
+
+    /* Enable interrupts for INTn and PCINTn pins */
+    GIMSK     |= _BV(DOT_INT)|_BV(PCIE);
+    PCMSK     |= _BV(DASH_INT);
 }
 
 void setup_timers(void)
@@ -51,46 +67,100 @@ void setup_timers(void)
 }
 
 static volatile uint8_t key_type = NONE;
-static volatile uint8_t dah_counter = 0;
-static volatile uint8_t prev_key_type = NONE;
 
-ISR(TIM0_COMPA_vect)
+/* DOT interrupt */
+ISR(INT0_vect)
 {
-    switch (key_type) {
+   _delay_ms(25); 
+   /* If dit is unset (pressed, pulled down) */
+   if ((DOT_PIN & DOT_MASK)) {
+       key_type = (key_type == DAH) ? DAH_ALTER : DIT;
+   } else {
+       key_type = (key_type == DIT) ? NONE      : DAH;
+   }
+}
+
+/*
+ * Dash interrupt
+ * Only one used -> no need for check the pin
+ */
+ISR(PCINT0_vect)
+{
+   _delay_ms(25); 
+   /* If dah is unset (pressed, pulled down) */
+   if ((DASH_PIN & DASH_MASK)) {
+       key_type = (key_type == DAH) ? DAH_ALTER : DIT;
+   } else {
+       key_type = (key_type == DIT) ? NONE      : DAH;
+   }
+}
+
+static volatile uint8_t dah_counter   = 0;
+static volatile uint8_t prev_key_type = NONE;
+static volatile bool    is_ready      = false;
+
+void key_handler(uint8_t key)
+{
+    switch (key) {
         case DAH:
         if (dah_counter < 3) { // Standard morse timing
+            is_ready = false;
             dah_counter++;
             OUT_ON();
         } else {
             dah_counter = 0;
             OUT_OFF();
+            is_ready = true;
         }
         break;
 
         case DIT:
+        is_ready = (OUT_PORT & OUT_MASK);
         OUT_TOGGLE(); 
         break;
 
-        case NONE:
         default:
         OUT_OFF();
         break;
     }
-    prev_key_type = key_type;
+    prev_key_type = key;
+}
+
+ISR(TIM0_COMPA_vect)
+{
+    if (is_ready) {
+        switch (key_type) {
+            case DIT_ALTER:
+            key_handler((prev_key_type == DIT) ? DAH : DIT);
+            break;
+
+            case DAH_ALTER:
+            key_handler((prev_key_type == DAH) ? DIT : DAH);
+            break;
+        }
+    } else {
+        key_handler(key_type);
+    }
+}
+
+void goto_bed(void)
+{
+    set_sleep_mode(SLEEP_MODE_PWR_DOWN);
+    sleep_enable();
+    sleep_cpu();	
 }
 
 int main() /* __attribute__((noreturn)) */
 {
     setup_pins();
     setup_timers();
+    //sei();
     while (1) {
-        if (DOT_PIN & DOT_MASK) { // DIT
-            key_type = DIT; //(key_type == DAH) ? DAH_ALTER : DIT;
-        } else if (DASH_PIN & DASH_MASK) { // DAH
-            key_type = DAH; //(key_type == DAH) ? DIT_ALTER : DAH;
-        } else {
-            dah_counter = 0;
-            key_type = NONE;
+        if (key_type == NONE) {
+            OUT_OFF();
+#if 1
+            goto_bed();
+#endif
         }
     }
 }
