@@ -5,6 +5,8 @@
 #include <util/delay.h>
 #include <avr/interrupt.h>
 
+/* Null to disable power-down sleep mode */
+#define DO_PWR_DOWN 1
 // For ATtiny13
 
 /* Port definitions, free to customize */
@@ -57,13 +59,12 @@ void setup_pins(void)
     PCMSK     |= _BV(DASH_INT);
 }
 
-void setup_timers(void)
+void setup_timer(void)
 {
     TCCR0A = _BV(WGM01);
     TCCR0B = _BV(CS02)|_BV(CS00); // ClkIO/1024, CTC
     TIMSK0 = _BV(OCIE0A); // Enable timer match interrupt
     OCR0A  = 100; // ~0.004 seconds (30 WPM)
-    sei();
 }
 
 static volatile uint8_t key_type = NONE;
@@ -128,38 +129,41 @@ void key_handler(uint8_t key)
 
 ISR(TIM0_COMPA_vect)
 {
+    uint8_t key = key_type;
+    /* No beeping currently, do the altering (if any) */
     if (is_ready) {
-        switch (key_type) {
-            case DIT_ALTER:
-            key_handler((prev_key_type == DIT) ? DAH : DIT);
-            break;
-
-            case DAH_ALTER:
-            key_handler((prev_key_type == DAH) ? DIT : DAH);
-            break;
+        /* Still need to do the first altering: */
+        if (prev_key_type == NONE) {
+            if (key_type == DIT_ALTER) {
+                key = DIT;
+            } else if (key_type == DAH_ALTER) {
+                key = DAH;
+            }
+        } else if (prev_key_type == DIT || prev_key_type == DAH) {
+            /* Excange the key types (the altering) */
+            key = (prev_key_type == DIT) ? DAH : DIT;
         }
-    } else {
-        key_handler(key_type);
     }
-}
-
-void goto_bed(void)
-{
-    set_sleep_mode(SLEEP_MODE_PWR_DOWN);
-    sleep_enable();
-    sleep_cpu();	
+    /* Do the keying */
+    key_handler(key);
 }
 
 int main() /* __attribute__((noreturn)) */
 {
     setup_pins();
-    setup_timers();
-    //sei();
+    setup_timer();
+    sei();
+
+#if DO_PWR_DOWN
+    set_sleep_mode(SLEEP_MODE_PWR_DOWN);
+    sleep_enable();
+#endif
+
     while (1) {
         if (key_type == NONE) {
             OUT_OFF();
-#if 1
-            goto_bed();
+#if DO_PWR_DOWN
+            sleep_cpu();
 #endif
         }
     }
