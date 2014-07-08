@@ -1,17 +1,26 @@
-//#define F_CPU   6e5
+// For ATtiny13
+#ifndef F_CPU
+# define F_CPU   6e5 // 600Khz CPU CLOCK
+#endif 
+
 #include <stdbool.h>
 #include <avr/io.h>
 #include <avr/sleep.h>
 #include <avr/interrupt.h>
 #include <util/delay.h>
 
+/* ----- GENERAL SETTINGS ----- */
 /* Null to disable power-down sleep mode */
 #define DO_PWR_DOWN 1
+/* Null to disable debouncing*/
 #define DO_DELAY 0
-// For ATtiny13
+/* Null to disable speed controll, with the ADC*/
+#define WPM_CONTROLL 1 
 
+/* Debounce by N miliseconds, if DO_DELAY=1 */
 #define DELAY_MS 10
 
+/* ----- PORT DEFINITIONS ----- */
 /* Dit types */
 #define DOT_PORT     PORTB
 #define DOT_PIN      PINB
@@ -27,14 +36,17 @@
 #define DASH_INT     PCINT2 /* Must match with the mask */
 
 /* Output pin can be any pin (logic high when keyed) */
-#define OUT_PORT     PORTB
-#define OUT_DDR      DDRB
-#define OUT_MASK     _BV(PB0)
-/* End of port predefs */
+#define KEY_PORT     PORTB
+#define KEY_DDR      DDRB
+#define KEY_MASK     _BV(PB0)
 
-#define OUT_ON()     OUT_PORT |= OUT_MASK
-#define OUT_OFF()    OUT_PORT &= ((uint8_t)~OUT_MASK)
-#define OUT_TOGGLE() OUT_PORT ^= ((uint8_t)OUT_MASK)
+#define WPM_CTRL_MUX MUX1
+#define WPM_CTRL_CH  2
+/* -----  END OF CONFIG  ----- */
+
+#define KEY_ON()     KEY_PORT |= KEY_MASK
+#define KEY_OFF()    KEY_PORT &= ((uint8_t)~KEY_MASK)
+#define KEY_TOGGLE() KEY_PORT ^= ((uint8_t)KEY_MASK)
 
 #define IS_DIT()       (DOT_PIN & DOT_MASK)
 #define IS_DAH()       (DASH_PIN & DASH_MASK)
@@ -45,23 +57,25 @@
 void setup_pins(void)
 {
     /* The output is the only output :) */
-    OUT_DDR    = OUT_MASK;
+    KEY_DDR    = KEY_MASK;
     GIMSK     |= _BV(PCIE);
     PCMSK     |= _BV(DOT_INT)|_BV(DASH_INT);
 }
 
 void enable_adc()
 {
+#if WPM_CONTROLL
     /* Left adjust (use 8bit) & select channel 2 (ADC2) */
-    ADMUX |= _BV(ADLAR)|_BV(MUX1);
+    ADMUX |= _BV(ADLAR)|_BV(WPM_CTRL_MUX);
     /* Enable the A/D converter with div128 */
     ADCSRA |= _BV(ADEN)|_BV(ADPS2)|_BV(ADPS1)|_BV(ADPS0);
+#endif
 }
 
 
 uint8_t read_adc(void)
 {
-    ADMUX = 2; // Channel 2 (ADC2)
+    ADMUX = WPM_CTRL_CH; // Channel 2 (ADC2)
     ADCSRA |= _BV(ADSC); // Start a single conversion
     loop_until_bit_is_clear(ADCSRA, ADSC); // Wait til' done
     return ADCH;
@@ -98,21 +112,21 @@ void key_handler()
         if (dah_counter < 3) { // Standard morse timing
             is_ready = false;
             dah_counter++;
-            OUT_ON();
+            KEY_ON();
         } else {
             dah_counter = 0;
-            OUT_OFF();
+            KEY_OFF();
             is_ready = true;
         }
         break;
 
         case DIT:
-        is_ready = (OUT_PORT & OUT_MASK);
-        OUT_TOGGLE(); 
+        is_ready = (KEY_PORT & KEY_MASK);
+        KEY_TOGGLE(); 
         break;
 		
 		default:
-        OUT_OFF();
+        KEY_OFF();
 		is_ready = true;
         break;
     }
@@ -120,8 +134,10 @@ void key_handler()
 
 ISR(TIM0_COMPA_vect)
 {
+#if WPM_CONTROLL
     /* Update the code rate */
     OCR0A = (uint8_t)read_adc()*40;
+#endif
     if (is_ready) {
         /* No beeping currently, do the altering (if any) */
         if (IS_ALTERING()) {
@@ -159,12 +175,14 @@ int main() /* __attribute__((noreturn)) */
     while (1) {
         /* No key is pressed, go to bed... */
         if (!IS_DIT() && !IS_DAH()) {
-            OUT_OFF();
+            KEY_OFF();
             dah_counter = 0;
             is_ready = true;
             curr_key = NONE;
 #if DO_PWR_DOWN
+# if WPM_CONTROLL
             ADCSRA &= (uint8_t)~_BV(ADEN); // disable adc
+# endif // WPM_CONTROLL
             sleep_cpu();
 #endif
         }
