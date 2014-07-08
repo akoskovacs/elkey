@@ -7,12 +7,12 @@ AVRDUDE_TARGET = attiny13
 OPTIMIZE       = -Os
 DEFS           =
 LIBS           =
-LFUSE		   = w:0x2A:m
-HFUSE		   = w:0xFD:m
+LFUSE		   = w:0x29:m
+HFUSE		   = w:0xFF:m
 CALIB	  	   = -B 100 #-O
 
 #HZ          = 20000000
-HZ          =  1200000 # 1.2Mhz (9.6Mhz/8)
+HZ          =  600000 # 600Khz (4.8Mhz/CLKDIV8)
 
 # You should not have to change anything below here.
 
@@ -20,7 +20,7 @@ CC             = avr-gcc
 
 # Override is only needed by avr-lib build system.
 
-override CFLAGS        = -g -DF_CPU=$(HZ) -Wall $(OPTIMIZE) -mmcu=$(MCU_TARGET) $(DEFS) -O3 -fno-inline 
+override CFLAGS        = -g -std=c99 -DF_CPU=$(HZ) -Wall $(OPTIMIZE) -mmcu=$(MCU_TARGET) $(DEFS) -O3 -fno-inline 
 override LDFLAGS       = -Wl,-Map,$(PRG).map
 
 OBJCOPY        = avr-objcopy
