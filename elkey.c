@@ -33,7 +33,7 @@
 #define DASH_PIN     PINB
 #define DASH_DDR     DDRB
 #define DASH_MASK    _BV(PB2)
-#define DASH_INT     PCINT2 /* Must match with the mask */
+#define DASH_INT     PCINT2
 
 /* Output pin can be any pin (logic high when keyed) */
 #define KEY_PORT     PORTB
@@ -136,7 +136,7 @@ ISR(TIM0_COMPA_vect)
 {
 #if WPM_CONTROLL
     /* Update the code rate */
-    OCR0A = (uint8_t)read_adc()*40;
+    OCR0A = (uint8_t)read_adc()*20;
 #endif
     if (is_ready) {
         /* No beeping currently, do the altering (if any) */
