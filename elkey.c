@@ -37,16 +37,23 @@
 
 /* Output pin can be any pin (logic high when keyed) */
 #define KEY_PORT     PORTB
+#define KEY_PIN      PINB
 #define KEY_DDR      DDRB
 #define KEY_MASK     _BV(PB0)
+
+/* Sound generator output */
+#define SND_PORT     PORTB
+#define SND_DDR      DDRB
+#define SND_MASK     _BV(PB3)
 
 #define WPM_CTRL_MUX MUX1
 #define WPM_CTRL_CH  2
 /* -----  END OF CONFIG  ----- */
 
 #define KEY_ON()     KEY_PORT |= KEY_MASK
-#define KEY_OFF()    KEY_PORT &= ((uint8_t)~KEY_MASK)
 #define KEY_TOGGLE() KEY_PORT ^= ((uint8_t)KEY_MASK)
+#define KEY_OFF()    KEY_PORT &= ((uint8_t)~KEY_MASK); \
+                      SND_PORT &= ((uint8_t)~SND_MASK)
 
 #define IS_DIT()       (DOT_PIN & DOT_MASK)
 #define IS_DAH()       (DASH_PIN & DASH_MASK)
@@ -56,8 +63,9 @@
 
 void setup_pins(void)
 {
-    /* The output is the only output :) */
-    KEY_DDR    = KEY_MASK;
+    KEY_DDR   |= KEY_MASK;
+    SND_DDR   |= SND_MASK;
+    /* Setup interrupt pins */
     GIMSK     |= _BV(PCIE);
     PCMSK     |= _BV(DOT_INT)|_BV(DASH_INT);
 }
@@ -84,9 +92,9 @@ uint8_t read_adc(void)
 void setup_timer(void)
 {
     TCCR0A = _BV(WGM01);
-    TCCR0B = _BV(CS02)|_BV(CS00); // ClkIO/256, CTC @ 600Khz
+    TCCR0B = _BV(CS01)|_BV(CS00); // ClkIO/64, CTC @ 600Khz
     TIMSK0 = _BV(OCIE0A); // Enable timer match interrupt
-    OCR0A  = 40;
+    OCR0A  = 0; // ~ 600 Hz
 }
 
 /*
@@ -101,9 +109,29 @@ ISR(PCINT0_vect)
    enable_adc();
 }
 
-static volatile enum MKEY_TYPE { NONE = 0, DIT, DAH } curr_key = NONE;
-static volatile uint8_t dah_counter   = 0;
-static volatile bool    is_ready      = false;
+static volatile uint16_t dit_ticks     = 0; /* Basic DIT timer counter */
+static volatile uint8_t  can_do_morse  = 0; // software "interrupt" flag
+
+ISR(TIM0_COMPA_vect)
+{
+    /* ATtiny13 has only one timer, do it in software */
+    /* Toggle if keyed */
+    if (KEY_PIN & KEY_MASK) {
+        SND_PORT ^= SND_MASK;
+    }
+
+    if (dit_ticks >= (read_adc()*20)) {
+        /* Time to do morse stuff, but not here */
+        can_do_morse = 1;
+        dit_ticks    = 0;
+    } else {
+        dit_ticks++;
+    }
+}
+
+static enum MKEY_TYPE { NONE = 0, DIT, DAH } curr_key = NONE;
+static uint8_t dah_counter   = 0;
+static bool    is_ready      = false;
 
 void key_handler()
 {
@@ -132,12 +160,8 @@ void key_handler()
     }
 }
 
-ISR(TIM0_COMPA_vect)
+void do_morse(void)
 {
-#if WPM_CONTROLL
-    /* Update the code rate */
-    OCR0A = (uint8_t)read_adc()*20;
-#endif
     if (is_ready) {
         /* No beeping currently, do the altering (if any) */
         if (IS_ALTERING()) {
@@ -160,6 +184,7 @@ ISR(TIM0_COMPA_vect)
     key_handler();
 }
 
+
 int main() /* __attribute__((noreturn)) */
 {
     setup_pins();
@@ -173,6 +198,10 @@ int main() /* __attribute__((noreturn)) */
 #endif
 
     while (1) {
+        if (can_do_morse) {
+            do_morse();
+            can_do_morse = 0;
+        }
         /* No key is pressed, go to bed... */
         if (!IS_DIT() && !IS_DAH()) {
             KEY_OFF();
