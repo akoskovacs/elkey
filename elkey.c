@@ -10,11 +10,11 @@
 #include <util/delay.h>
 
 /* ----- GENERAL SETTINGS ----- */
-/* Null to disable power-down sleep mode */
+/* 0 to disable power-down sleep mode */
 #define DO_PWR_DOWN 1
-/* Null to disable debouncing*/
+/* 0 to disable debouncing*/
 #define DO_DELAY 0
-/* Null to disable speed controll, with the ADC*/
+/* 0 to disable speed controll, with the ADC*/
 #define WPM_CONTROLL 1 
 
 /* Debounce by N miliseconds, if DO_DELAY=1 */
@@ -74,7 +74,7 @@ void enable_adc()
 {
 #if WPM_CONTROLL
     /* Left adjust (use 8bit) & select channel 2 (ADC2) */
-    ADMUX |= _BV(ADLAR)|_BV(WPM_CTRL_MUX);
+    ADMUX  |= _BV(WPM_CTRL_MUX);
     /* Enable the A/D converter with div128 */
     ADCSRA |= _BV(ADEN)|_BV(ADPS2)|_BV(ADPS1)|_BV(ADPS0);
 #endif
@@ -110,7 +110,7 @@ ISR(PCINT0_vect)
 }
 
 static volatile uint16_t dit_ticks     = 0; /* Basic DIT timer counter */
-static volatile uint8_t  can_do_morse  = 0; // software "interrupt" flag
+static volatile bool     can_do_morse  = false; // software "interrupt" flag
 
 ISR(TIM0_COMPA_vect)
 {
@@ -122,7 +122,7 @@ ISR(TIM0_COMPA_vect)
 
     if (dit_ticks >= (read_adc()*20)) {
         /* Time to do morse stuff, but not here */
-        can_do_morse = 1;
+        can_do_morse = true;
         dit_ticks    = 0;
     } else {
         dit_ticks++;
@@ -200,7 +200,7 @@ int main() /* __attribute__((noreturn)) */
     while (1) {
         if (can_do_morse) {
             do_morse();
-            can_do_morse = 0;
+            can_do_morse = false;
         }
         /* No key is pressed, go to bed... */
         if (!IS_DIT() && !IS_DAH()) {
